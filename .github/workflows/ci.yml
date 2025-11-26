@@ -1,0 +1,57 @@
+name: CI — Test & Lint
+if: matrix.target == 'services'
+uses: actions/cache@v4
+with:
+path: ~/.m2/repository
+key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+restore-keys: |
+${{ runner.os }}-m2-
+
+
+- name: Run service tests
+if: matrix.target == 'services'
+run: |
+echo "Running mvn test for changed modules"
+# detect changed service folders and run tests per service
+CHANGED=$(git diff --name-only ${{ github.sha }} ${{ github.event.before }} | grep '^services/' || true)
+if [ -z "$CHANGED" ]; then
+echo "No service changes detected; running full module tests"
+mvn -T 1C -q -DskipIntegrationTests=false test
+else
+echo "$CHANGED"
+for d in $(echo "$CHANGED" | cut -d'/' -f2 | sort -u); do
+if [ -d "services/$d" ]; then
+echo "Running tests for service: $d"
+(cd services/$d && mvn -T 1C -q test)
+fi
+done
+fi
+
+
+- name: Set up Flutter
+if: matrix.target == 'mobile'
+uses: subosito/flutter-action@v2
+with:
+flutter-version: '3.10.0'
+
+
+- name: Run Flutter tests
+if: matrix.target == 'mobile'
+run: |
+cd mobile
+flutter pub get
+flutter test --coverage
+
+
+lint:
+runs-on: ubuntu-latest
+steps:
+- uses: actions/checkout@v4
+- name: Java lint (spotless)
+if: env.CHECK_SPOTLESS == 'true'
+run: |
+for d in services/*; do
+if [ -f "$d/pom.xml" ]; then
+(cd $d && mvn -q com.diffplug.spotless:spotless-maven-plugin:apply)
+fi
+done
